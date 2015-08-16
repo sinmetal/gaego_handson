@@ -42,21 +42,51 @@ Usage:
 ...
 ```
 
+[Free Trial申し込みページ](https://cloud.google.com/free-trial/)からGoogle Cloud Platform Projectを作成する。
+
+
 ### Part 1
 
-Hello Worldを作成して、deployする
+Hello Worldを表示するApplicationを作成してdeployする
+
+[handson/part1](https://github.com/sinmetal/gaego_handson/tree/handson/part1)を写経する
 
 #### local server
 
 ```
-goapp serve {your src dir}
+$ goapp serve {your src dir}
 ```
+
+http://locahost:8080/hello にアクセスしてHello Worldが表示されればOK
 
 #### deploy command
 
+[app.yaml](https://github.com/sinmetal/gaego_handson/blob/handson/part1/src/app.yaml)のapplicationを自分のGCP Project IDに修正する
+
 ```
-goapp deploy {your src dir}
+$ goapp deploy {your src dir}
 ```
 
 ### Part 2
 
+jsonをpayloadに使うAPIの作成してみよう。
+データはApp EngineのデフォルトのDBである[Datastore](https://cloud.google.com/appengine/docs/go/datastore/)に保存する。
+Part2ではhttp postを受け取り、Datastoreに保存するAPIを作成する。
+
+* [handson/part2](https://github.com/sinmetal/gaego_handson/tree/handson/part2)を写経する。
+* [DHC](https://chrome.google.com/webstore/detail/dhc-resthttp-api-client/aejoelaoggembcahagimdiliamlcdmfm) などを利用して、Post Requestを送る。
+
+* http://localhost:8080/api/1/item に対して以下のようなjsonをPOSTして、http status 201が返ってくれば完成。
+
+```
+{
+    "title": "hoge"
+}
+```
+
+* http://localhost:8000 からDatastore Viewerを利用して、登録したデータが保存されていることも確認してみよう。
+* localで確認できたら、deployして確認してみよう。
+
+### Part 3
+
+Part2のAPIにGet Requestを追加して、登録したデータの一覧を取得できるようにする
