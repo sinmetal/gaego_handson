@@ -51,6 +51,8 @@ Hello Worldを表示するApplicationを作成してdeployする
 
 [handson/part1](https://github.com/sinmetal/gaego_handson/tree/handson/part1)を写経する
 
+[handson/part1](https://github.com/sinmetal/gaego_handson/tree/handson/part1)を写経する
+
 #### local server
 
 ```
