@@ -31,6 +31,8 @@ func SetUpItem(m *http.ServeMux) {
 func (a *ItemApi) handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		a.doPost(w, r)
+	} else if r.Method == "GET" {
+		a.doList(w, r)
 	} else {
 		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
@@ -63,4 +65,30 @@ func (a *ItemApi) doPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(item)
+}
+
+func (a *ItemApi) doList(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	q := datastore.NewQuery("Item").Order("-UpdatedAt").Limit(10)
+
+	var items []Item
+	t := q.Run(c)
+	for {
+		var item Item
+		k, err := t.Next(&item)
+		if err == datastore.Done {
+			break
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		item.KeyStr = k.Encode()
+		items = append(items, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(items)
 }
