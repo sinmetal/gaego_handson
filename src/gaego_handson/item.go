@@ -7,6 +7,7 @@ import (
 
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/datastore"
+	"google.golang.org/appengine/log"
 
 	"github.com/pborman/uuid"
 )
@@ -29,10 +30,20 @@ func SetUpItem(m *http.ServeMux) {
 }
 
 func (a *ItemApi) handler(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
 	if r.Method == "POST" {
 		a.doPost(w, r)
 	} else if r.Method == "GET" {
-		a.doList(w, r)
+		key := r.URL.Query().Get("key")
+		log.Infof(c, "key param = %s", key)
+
+		if len(key) < 1 {
+			a.doList(w, r)
+		} else {
+			a.doGet(w, r)
+		}
+
 	} else {
 		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
@@ -91,4 +102,31 @@ func (a *ItemApi) doList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(items)
+}
+
+func (a *ItemApi) doGet(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	keyStr := r.URL.Query().Get("key")
+	key, err := datastore.DecodeKey(keyStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var item Item
+	err = datastore.Get(c, key, &item)
+	if err == datastore.ErrNoSuchEntity {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	item.KeyStr = key.Encode()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(item)
 }
