@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/net/context"
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/datastore"
 	"google.golang.org/appengine/log"
@@ -43,7 +44,8 @@ func (a *ItemApi) handler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			a.doGet(w, r)
 		}
-
+	} else if r.Method == "PUT" {
+		a.doPut(w, r)
 	} else {
 		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
@@ -116,6 +118,55 @@ func (a *ItemApi) doGet(w http.ResponseWriter, r *http.Request) {
 
 	var item Item
 	err = datastore.Get(c, key, &item)
+	if err == datastore.ErrNoSuchEntity {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	item.KeyStr = key.Encode()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(item)
+}
+
+func (a *ItemApi) doPut(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	keyStr := r.URL.Query().Get("key")
+	if len(keyStr) < 1 {
+		http.Error(w, "required key.", http.StatusBadRequest)
+		return
+	}
+	key, err := datastore.DecodeKey(keyStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var param Item
+	err = json.NewDecoder(r.Body).Decode(&param)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var item Item
+	err = datastore.RunInTransaction(c, func(c context.Context) error {
+		err := datastore.Get(c, key, &item)
+		if err != nil {
+			return err
+		}
+		item.Title = param.Title
+		item.UpdatedAt = time.Now()
+
+		_, err = datastore.Put(c, key, &item)
+		return err
+	}, nil)
 	if err == datastore.ErrNoSuchEntity {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
