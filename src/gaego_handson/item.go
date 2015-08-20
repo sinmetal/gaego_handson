@@ -46,6 +46,8 @@ func (a *ItemApi) handler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if r.Method == "PUT" {
 		a.doPut(w, r)
+	} else if r.Method == "DELETE" {
+		a.doDelete(w, r)
 	} else {
 		http.Error(w, "", http.StatusMethodNotAllowed)
 	}
@@ -180,4 +182,28 @@ func (a *ItemApi) doPut(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(item)
+}
+
+func (a *ItemApi) doDelete(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	keyStr := r.URL.Query().Get("key")
+	if len(keyStr) < 1 {
+		http.Error(w, "required key.", http.StatusBadRequest)
+		return
+	}
+	key, err := datastore.DecodeKey(keyStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = datastore.Delete(c, key)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
 }
