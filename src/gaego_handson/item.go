@@ -129,6 +129,7 @@ func (a *ItemApi) doList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60") // add edge cache
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(items)
 }
