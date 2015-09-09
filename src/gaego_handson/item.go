@@ -9,6 +9,7 @@ import (
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/datastore"
 	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/taskqueue"
 
 	"github.com/pborman/uuid"
 )
@@ -28,6 +29,7 @@ func SetUpItem(m *http.ServeMux) {
 	api := ItemApi{}
 
 	m.HandleFunc("/api/1/item", api.handler)
+	m.HandleFunc("/queue/1/item", api.handlerQueue)
 }
 
 func (a *ItemApi) handler(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +55,14 @@ func (a *ItemApi) handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *ItemApi) handlerQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		a.doPostByQueue(w, r)
+	} else {
+		http.Error(w, "", http.StatusMethodNotAllowed)
+	}
+}
+
 func (a *ItemApi) doPost(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 
@@ -69,13 +79,28 @@ func (a *ItemApi) doPost(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
+	// datastore.RunInTransactionは自動的にリトライされるので、冪等性を考慮して、UUIDは先に作っておく
+	id := uuid.New()
+	err = datastore.RunInTransaction(c, func(c context.Context) error {
+		key, err := datastore.Put(c, datastore.NewKey(c, "Item", id, 0, nil), &item)
+		if err != nil {
+			log.Warningf(c, "%v", err)
+			return err
+		}
+		item.KeyStr = key.Encode()
 
-	key, err := datastore.Put(c, datastore.NewKey(c, "Item", uuid.New(), 0, nil), &item)
+		t := taskqueue.NewPOSTTask("/queue/1/item", map[string][]string{"key": {item.KeyStr}})
+		if _, err := taskqueue.Add(c, t, "item-after"); err != nil {
+			log.Warningf(c, "%v", err)
+			return err
+		}
+
+		return nil
+	}, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	item.KeyStr = key.Encode()
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusCreated)
@@ -206,4 +231,40 @@ func (a *ItemApi) doDelete(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *ItemApi) doPostByQueue(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	// exampleとしてHeader表示
+	for k, v := range r.Header {
+		log.Infof(c, "%s:%s", k, v)
+	}
+
+	keyStr := r.FormValue("key")
+	log.Infof(c, "key param = %s", keyStr)
+	key, err := datastore.DecodeKey(keyStr)
+	if err != nil {
+		log.Errorf(c, "key decode error = %s", err.Error())
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var item Item
+	err = datastore.Get(c, key, &item)
+	if err == datastore.ErrNoSuchEntity {
+		log.Errorf(c, "entity not found = %s", err.Error())
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Errorf(c, "entity get error = %s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	item.KeyStr = key.Encode()
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(item)
 }
