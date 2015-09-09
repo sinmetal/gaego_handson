@@ -1,6 +1,8 @@
 package gaego_handson
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/datastore"
 	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/memcache"
 	"google.golang.org/appengine/taskqueue"
 
 	"github.com/pborman/uuid"
@@ -136,6 +139,24 @@ func (a *ItemApi) doGet(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 
 	keyStr := r.URL.Query().Get("key")
+	if mi, err := memcache.Get(c, keyStr); err == memcache.ErrCacheMiss {
+		// nop
+	} else if err != nil {
+		log.Warningf(c, "item get memcache error, %s", err.Error())
+	} else {
+		log.Infof(c, "memcache hit!")
+		item := Item{}
+		err = item.GobDecode(mi.Value)
+		if err != nil {
+			log.Warningf(c, "item get memcache decode error, %s", err.Error())
+		} else {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(item)
+			return
+		}
+	}
+
 	key, err := datastore.DecodeKey(keyStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -153,6 +174,19 @@ func (a *ItemApi) doGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item.KeyStr = key.Encode()
+
+	b, err := item.GobEncode()
+	if err != nil {
+		log.Warningf(c, "item gob encode error, %s", err.Error())
+	}
+	mi := &memcache.Item{
+		Key:   item.KeyStr,
+		Value: b,
+	}
+	err = memcache.Add(c, mi)
+	if err != nil {
+		log.Warningf(c, "item add memcache error, %s", err.Error())
+	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -180,6 +214,12 @@ func (a *ItemApi) doPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer r.Body.Close()
+
+	err = memcache.Delete(c, keyStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	var item Item
 	err = datastore.RunInTransaction(c, func(c context.Context) error {
@@ -219,6 +259,12 @@ func (a *ItemApi) doDelete(w http.ResponseWriter, r *http.Request) {
 	key, err := datastore.DecodeKey(keyStr)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = memcache.Delete(c, keyStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -266,4 +312,44 @@ func (a *ItemApi) doPostByQueue(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(item)
+}
+
+func (item *Item) GobEncode() ([]byte, error) {
+	w := new(bytes.Buffer)
+	encoder := gob.NewEncoder(w)
+	err := encoder.Encode(item.KeyStr)
+	if err != nil {
+		return nil, err
+	}
+	err = encoder.Encode(item.Title)
+	if err != nil {
+		return nil, err
+	}
+	err = encoder.Encode(item.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	err = encoder.Encode(item.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return w.Bytes(), nil
+}
+
+func (item *Item) GobDecode(buf []byte) error {
+	r := bytes.NewBuffer(buf)
+	decoder := gob.NewDecoder(r)
+	err := decoder.Decode(&item.KeyStr)
+	if err != nil {
+		return err
+	}
+	err = decoder.Decode(&item.Title)
+	if err != nil {
+		return err
+	}
+	err = decoder.Decode(&item.CreatedAt)
+	if err != nil {
+		return err
+	}
+	return decoder.Decode(&item.UpdatedAt)
 }
