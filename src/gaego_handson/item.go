@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"golang.org/x/net/context"
@@ -23,6 +24,16 @@ type Item struct {
 	Title     string    `json:"title" datastore:",noindex"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type ItemWithCursor struct {
+	Item   Item   `json:"item"`
+	Cursor string `json:"cursor"`
+}
+
+type ListResponse struct {
+	Cursor string      `json:"cursor"`
+	Items  interface{} `json:"items`
 }
 
 type ItemApi struct {
@@ -111,9 +122,31 @@ func (a *ItemApi) doPost(w http.ResponseWriter, r *http.Request) {
 func (a *ItemApi) doList(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 
-	q := datastore.NewQuery("Item").Order("-UpdatedAt").Limit(10)
+	const maxValue = 1000
+	limit := 10 // default limit
+	limitParam := r.FormValue("limit")
+	if len(limitParam) > 0 {
+		i, err := strconv.Atoi(limitParam)
+		if err == nil {
+			if i < maxValue {
+				limit = i
+			} else {
+				limit = maxValue
+			}
+		}
+	}
 
-	var items []Item
+	cursorParam := r.FormValue("cursor")
+
+	q := datastore.NewQuery("Item").Order("-UpdatedAt").Limit(limit)
+	if len(cursorParam) > 0 {
+		cursor, err := datastore.DecodeCursor(cursorParam)
+		if err == nil {
+			q = q.Start(cursor)
+		}
+	}
+
+	var items []ItemWithCursor
 	t := q.Run(c)
 	for {
 		var item Item
@@ -126,13 +159,33 @@ func (a *ItemApi) doList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		item.KeyStr = k.Encode()
-		items = append(items, item)
+
+		cursor, err := t.Cursor()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		iwc := ItemWithCursor{
+			Item:   item,
+			Cursor: cursor.String(),
+		}
+		items = append(items, iwc)
+	}
+	cursor, err := t.Cursor()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	lr := ListResponse{
+		Cursor: cursor.String(),
+		Items:  items,
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=60") // add edge cache
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(items)
+	json.NewEncoder(w).Encode(lr)
 }
 
 func (a *ItemApi) doGet(w http.ResponseWriter, r *http.Request) {
